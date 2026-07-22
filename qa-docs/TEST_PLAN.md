@@ -30,10 +30,18 @@
 6. **Security/Roles** — проверка, че admin функции (users, audit) не са достъпни без логин.
 
 ## 5. Roles и достъп
+Приложението има 4 реални роли (виж `applyUserUI()` в `index.html`), не 2:
+
 | Роля | Достъп |
 |---|---|
-| Гост/Потребител | Zoom, търсене, преглед на части, поръчки |
-| Admin/Собственик | Dashboard, Audit панел, Users панел, редакция на части |
+| **viewer** | Zoom, търсене, преглед на части. Без Orders/Scan, без edit/drag/debug инструменти |
+| **tech** | Orders, Scan; без Schemes, без edit/drag/debug. При логин автоматично отваря Orders панел |
+| **editor** | Notifications, Audit, New order, Orders, Scan, Schemes, edit/drag/debug. Без Users панел |
+| **admin** | Пълен достъп — всичко от editor + Users панел |
+
+Бърз тестов вход (`quickLogin`) на login екрана предлага само `admin` и
+`tech`; `editor`/`viewer` акаунти се тестват през реален логин с акаунт,
+създаден от Users панела.
 
 ## 6. Критерии за приемане
 - Няма счупени zoom/pan контроли в нито един поддържан браузър.
