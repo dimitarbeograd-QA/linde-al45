@@ -1,33 +1,32 @@
 // @ts-check
 import { expect } from '@playwright/test';
 
-/** Seed акаунти, огледални на дефолтните в index.html (виж ensureDefaultUsers). */
-const SEED_USERS = [
-  { id: 1, username: 'admin', password: 'admin123', name: 'Администратор', role: 'admin', created: Date.now(), last_login: null },
-  { id: 2, username: 'editor1', password: 'editor123', name: 'Редактор', role: 'editor', created: Date.now(), last_login: null },
-  { id: 3, username: 'tech', password: 'tech123', name: 'Сервизен техник', role: 'tech', created: Date.now(), last_login: null },
-  { id: 4, username: 'viewer1', password: 'viewer123', name: 'Наблюдател', role: 'viewer', created: Date.now(), last_login: null },
-];
+/** Demo акаунти, seed-нати сървърно при старт (виж server/db.js SEED_USERS). */
+const CREDENTIALS = {
+  admin:  { username: 'admin',   password: 'admin123' },
+  editor: { username: 'editor1', password: 'editor123' },
+  tech:   { username: 'tech',    password: 'tech123' },
+  viewer: { username: 'viewer1', password: 'viewer123' },
+};
 
 /**
- * Сийдва localStorage/sessionStorage така, че приложението да зареди вече
- * логнато с дадената роля — огледално на AuthDB (`lp_users`, `lp_session`)
- * в index.html. Използва page.addInitScript, за да е налично storage-а
- * преди да изпълни inline скриптовете на страницата (initAuth() при `load`).
+ * Логва РЕАЛНО през POST /api/login (page.request споделя browser context-а
+ * с page-а, така че httpOnly сесийната бисквитка, която сървърът връща, е
+ * налична при следващия page.goto()) — огледално на действителния login
+ * flow. Заменя старото директно писане в localStorage['lp_users'] +
+ * sessionStorage['lp_session'], което симулираше точно уязвимостта, дето
+ * вече е поправена (виж "console bypass" регресионния тест в auth.spec.js).
  *
  * @param {import('@playwright/test').Page} page
  * @param {'admin'|'editor'|'tech'|'viewer'} role
  */
-export async function seedSession(page, role) {
-  const user = SEED_USERS.find(u => u.role === role);
-  if (!user) throw new Error(`Unknown role: ${role}`);
-  await page.addInitScript(([users, sessionUser]) => {
-    localStorage.setItem('lp_users', JSON.stringify(users));
-    sessionStorage.setItem('lp_session', JSON.stringify({
-      user: { id: sessionUser.id, username: sessionUser.username, name: sessionUser.name, role: sessionUser.role },
-      expires: Date.now() + 8 * 3600 * 1000,
-    }));
-  }, [SEED_USERS, user]);
+export async function login(page, role) {
+  const creds = CREDENTIALS[role];
+  if (!creds) throw new Error(`Unknown role: ${role}`);
+  const res = await page.request.post('/api/login', { data: creds });
+  if (!res.ok()) {
+    throw new Error(`Login failed for role "${role}": ${res.status()} ${await res.text()}`);
+  }
 }
 
 /**
@@ -36,9 +35,12 @@ export async function seedSession(page, role) {
  * applyUserUI() автоматично отваря за admin/editor (Dashboard) и tech
  * (Orders) — за да тръгват тестовете от чист, предвидим базов екран.
  * Самото auto-open поведение се тества отделно в auth.spec.js.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {'admin'|'editor'|'tech'|'viewer'} role
  */
 export async function gotoLoggedIn(page, role) {
-  await seedSession(page, role);
+  await login(page, role);
   await page.goto('/');
   await page.locator('#userBadge').waitFor({ state: 'visible' });
   await page.waitForFunction(() => {
@@ -53,5 +55,24 @@ export async function gotoLoggedIn(page, role) {
     await expect(page.locator('#ordersOverlay')).toBeVisible({ timeout: 3000 });
     await page.evaluate(() => window.closeOrdersPanel());
     await expect(page.locator('#ordersOverlay')).toBeHidden();
+  }
+}
+
+/**
+ * Връща сървърния SQLite state (users) към default seed и унищожава
+ * текущата сесия — вика POST /api/test/reset (само налично при
+ * NODE_ENV=test, виж server/server.js, огледално на muzei-lom). За разлика
+ * от старото localStorage-базирано fake state, backend-ът пази реално
+ * споделен state между тестовете — извикай това в beforeEach за spec
+ * файлове, чиито тестове мутират сървърен state (напр. /api/users или
+ * бъдещи auth-свързани endpoint-и), за да останат независими от реда на
+ * изпълнение.
+ *
+ * @param {import('@playwright/test').APIRequestContext} request
+ */
+export async function resetServerState(request) {
+  const res = await request.post('/api/test/reset');
+  if (!res.ok()) {
+    throw new Error('POST /api/test/reset failed — сървърът стартиран ли е с NODE_ENV=test?');
   }
 }

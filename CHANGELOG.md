@@ -4,6 +4,18 @@
 Форматът следва приблизително [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+### Security
+- **Реален backend за автентикация** (`server/` — Express + SQLite +
+  bcrypt): преди това `AuthDB.setSession()` пазеше цялата сесия/роля в
+  client-writable `sessionStorage`, а `hashPw()` не беше истинско
+  хеширане — всеки посетител можеше от DevTools конзолата да си зададе
+  `role:'admin'` без парола и приложението да го приеме след презареждане.
+  Сега `POST /api/login` прави bcrypt сравнение server-side и записва
+  сесията в httpOnly cookie, недостъпен за клиентски JS; `AuthDB.
+  setSession()/getSession()` са премахнати изцяло. Виж `ARCHITECTURE.md#backend`
+  и `SECURITY.md`. Регресионен тест в `tests/auth.spec.js` доказва, че
+  старата атака вече не работи.
+
 ### Fixed
 - `initAuth()` не викаше `hideLoginOverlay()`, когато вече съществува валидна
   сесия — при презареждане на страницата докато си логнат, login overlay-ят

@@ -3459,6 +3459,14 @@ const DB = {
 };
 
 // ── ЛОКАЛНА AUTH DATABASE ──
+// Забележка: това вече НЕ управлява реалната автентикация/сесия — само
+// локален "огледален" списък потребители (за Users/Audit панелите, чисто
+// UI cosmetic данни) и локалния audit log. Реалната сесия (кой е логнат и
+// с каква роля) идва изцяло от сървъра (/api/login, /api/session,
+// /api/logout — виж server/server.js) и се пази в httpOnly cookie, който
+// клиентският JS изобщо не вижда/пипа. Умишлено няма getSession/setSession/
+// clearSession тук повече — точно тези методи бяха начинът, по който всеки
+// посетител можеше да си самоодобри admin роля през DevTools конзолата.
 const AuthDB = {
   getUsers() {
     try { return JSON.parse(localStorage.getItem('lp_users')||'[]'); } catch(e){return[];}
@@ -3472,18 +3480,7 @@ const AuthDB = {
     log.unshift({...entry, id: Date.now(), ts: Math.floor(Date.now()/1000)});
     if (log.length > 500) log.length = 500;
     localStorage.setItem('lp_audit', JSON.stringify(log));
-  },
-  getSession() {
-    try {
-      const s = JSON.parse(sessionStorage.getItem('lp_session')||'null');
-      if (!s || s.expires < Date.now()) return null;
-      return s.user;
-    } catch(e){return null;}
-  },
-  setSession(user) {
-    sessionStorage.setItem('lp_session', JSON.stringify({user, expires: Date.now()+8*3600*1000}));
-  },
-  clearSession() { sessionStorage.removeItem('lp_session'); }
+  }
 };
 
 // ── CHAT DATABASE ──
@@ -3659,7 +3656,14 @@ function hashPw(pw) { return 'pw_' + btoa(pw + '_linde_salt_2024'); }
 
 async function initAuth() {
   ensureDefaultUsers();
-  let user = AuthDB.getSession();
+  let user = null;
+  try {
+    const res = await fetch('/api/session');
+    const data = await res.json();
+    user = data.user || null;
+  } catch (e) {
+    console.warn('Session check failed (сървърът стартиран ли е?):', e);
+  }
   if (!user) {
     showLoginOverlay();
     return false;
@@ -3730,8 +3734,9 @@ document.addEventListener('keydown', e => {
   }
 });
 
-function doLogout() {
-  AuthDB.clearSession();
+async function doLogout() {
+  try { await fetch('/api/logout', { method: 'POST' }); }
+  catch (e) { console.warn('Logout request failed:', e); }
   currentUser = null;
   // Затвори всички отворени панели
   ['ordersOverlay','orderFormOverlay','expeditionOverlay','packageFormOverlay',
@@ -3744,49 +3749,66 @@ function doLogout() {
   showLoginOverlay();
 }
 
-function quickLogin(role) {
-  // Бърз вход за тест — без парола
-  ensureDefaultUsers();
-  let users = AuthDB.getUsers();
-
-  // Ensure test tech user exists
-  if (!users.find(u => u.username === 'tech')) {
-    users.push({id: Date.now(), username:'tech', password:'tech123',
-      name:'Сервизен техник', role:'tech', created: Date.now(), last_login: null});
-    AuthDB.saveUsers(users);
-  }
-
-  const username = role === 'admin' ? 'admin' : 'tech';
-  const user = AuthDB.getUsers().find(u => u.username === username);
-  if (!user) return;
-
-  user.last_login = Date.now();
-  AuthDB.saveUsers(AuthDB.getUsers().map(u => u.username===username ? {...u, last_login:Date.now()} : u));
-  AuthDB.addAudit({username: user.username, action:'login', details:'Бърз вход (тест)'});
-  AuthDB.setSession({id:user.id, username:user.username, name:user.name, role:user.role});
-  currentUser = {id:user.id, username:user.username, name:user.name, role:user.role};
-  hideLoginOverlay();
-  applyUserUI();
-  init();
+// Best-effort локален audit/last_login bookkeeping за Users/Audit панелите
+// (чисто cosmetic UI данни — виж бележката над AuthDB). Реалната автентикация
+// вече мина успешно на сървъра преди това да се извика.
+function recordLocalLogin(user, details) {
+  try {
+    const users = AuthDB.getUsers();
+    const idx = users.findIndex(u => u.username === user.username);
+    if (idx >= 0) {
+      users[idx] = {...users[idx], last_login: Date.now()};
+      AuthDB.saveUsers(users);
+    }
+    AuthDB.addAudit({username: user.username, action:'login', details});
+  } catch (e) { console.warn('Local audit bookkeeping failed:', e); }
 }
 
-function doLogin() {
+function quickLogin(role) {
+  // Бърз вход (тест) — вече минава през СЪЩИЯ реален /api/login като ръчния
+  // вход, само предварително попълва demo credentials-ите. Няма никакъв
+  // client-side-only "trust me, аз съм admin" път повече.
+  const creds = {
+    admin: { username: 'admin', password: 'admin123' },
+    tech:  { username: 'tech',  password: 'tech123' },
+  }[role];
+  if (!creds) return;
+  document.getElementById('loginUser').value = creds.username;
+  document.getElementById('loginPass').value = creds.password;
+  doLogin({ viaQuickLogin: true });
+}
+
+async function doLogin(opts) {
+  const viaQuickLogin = !!(opts && opts.viaQuickLogin);
   const username = document.getElementById('loginUser').value.trim();
   const password = document.getElementById('loginPass').value;
   const err = document.getElementById('loginErr');
   err.style.display = 'none';
-  const users = AuthDB.getUsers();
-  const user = users.find(u => u.username === username);
-  if (!user) { err.textContent = 'Грешно потребителско име или парола'; err.style.display='block'; return; }
-  // Check password (stored as plain for demo, or hashed)
-  const pwMatch = user.password === password || user.password === hashPw(password);
-  if (!pwMatch) { err.textContent = 'Грешно потребителско име или парола'; err.style.display='block'; return; }
-  // Update last_login
-  user.last_login = Date.now();
-  AuthDB.saveUsers(users);
-  AuthDB.addAudit({username: user.username, action:'login', details:'Вход в системата', scheme_id:null, pos:null});
-  AuthDB.setSession({id:user.id, username:user.username, name:user.name, role:user.role});
-  currentUser = {id:user.id, username:user.username, name:user.name, role:user.role};
+  if (!username || !password) {
+    err.textContent = 'Грешно потребителско име или парола';
+    err.style.display = 'block';
+    return;
+  }
+  let data;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    data = await res.json();
+    if (!res.ok || !data.user) {
+      err.textContent = data.error || 'Грешно потребителско име или парола';
+      err.style.display = 'block';
+      return;
+    }
+  } catch (e) {
+    err.textContent = 'Грешка при връзка със сървъра';
+    err.style.display = 'block';
+    return;
+  }
+  currentUser = data.user;
+  recordLocalLogin(currentUser, viaQuickLogin ? 'Бърз вход (тест)' : 'Вход в системата');
   hideLoginOverlay();
   applyUserUI();
   // Re-init app

@@ -1,3 +1,6 @@
 node_modules/
 playwright-report/
 test-results/
+server/.env
+server/data.db
+server/data.db-*

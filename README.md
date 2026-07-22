@@ -14,11 +14,24 @@ zoom/pan схема с части за мотокар Linde AL45. Позволя
 - Admin панели: Dashboard, Audit log, Users (само за оторизирани потребители)
 
 ## Стартиране
-Приложението е статичен `index.html` — не изисква build стъпка.
+От версията с `server/` насам приложението има реален backend (Express +
+SQLite) — виж [`ARCHITECTURE.md`](ARCHITECTURE.md#backend) за защо (login
+вече не е client-side).
+
+**Пълно приложение (реален login работи):**
 ```
-# отвори директно във браузър, или сервирай статично, напр.:
-npx serve .
+cd server
+npm install
+cp .env.example .env   # по желание — SESSION_SECRET/PORT
+npm start
 ```
+Отвори `http://localhost:3002`. Демо акаунти (виж `ARCHITECTURE.md#роли`):
+`admin`/`admin123`, `editor1`/`editor123`, `tech`/`tech123`, `viewer1`/`viewer123`.
+
+**Само статичен preview (`npx serve .`):** зарежда login екрана, но реален
+вход не работи без backend-а — `/api/login`/`/api/session` няма да
+отговорят. Ползвай само за бърз преглед на статичния markup/CSS, не за
+реално разглеждане на диаграмата.
 
 ## Структура
 Виж [`ARCHITECTURE.md`](ARCHITECTURE.md) за преглед на структурата на кода.
