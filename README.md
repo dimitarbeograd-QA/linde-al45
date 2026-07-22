@@ -24,7 +24,15 @@ npx serve .
 Виж [`ARCHITECTURE.md`](ARCHITECTURE.md) за преглед на структурата на кода.
 
 ## QA / Тестване
-Виж [`qa-docs/`](qa-docs/) за test plan и тест кейсове.
+Виж [`qa-docs/`](qa-docs/) за test plan и ръчни тест кейсове.
+
+Автоматизирани E2E тестове (Playwright) в [`tests/`](tests/) покриват login/роли,
+zoom/pan, търсене, popup картата и схеми панела:
+```
+npm install
+npx playwright install chromium
+npm test
+```
 
 ## Принос
 Виж [`CONTRIBUTING.md`](CONTRIBUTING.md).

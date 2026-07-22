@@ -3665,6 +3665,7 @@ async function initAuth() {
     return false;
   }
   currentUser = user;
+  hideLoginOverlay();
   applyUserUI();
   return true;
 }
