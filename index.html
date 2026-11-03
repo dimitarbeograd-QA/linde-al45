@@ -3654,13 +3654,46 @@ function ensureDefaultUsers() {
 
 function hashPw(pw) { return 'pw_' + btoa(pw + '_linde_salt_2024'); }
 
+// ── ДЕМО РЕЖИМ (статичен хостинг, напр. GitHub Pages) ──
+// Реалният вход изисква server/ (Express + SQLite). Когато /api/* върне страница
+// вместо JSON (404 от статичен хост), приложението минава в демо режим: акаунтите
+// са същите като в server/db.js, а сесията живее само в sessionStorage на таба.
+// Със сървър този код никога не се включва — реалната автентикация е непроменена.
+const DEMO_USERS = [
+  { id: 1, username: 'admin',   password: 'admin123',  name: 'Администратор',   role: 'admin' },
+  { id: 2, username: 'editor1', password: 'editor123', name: 'Редактор',        role: 'editor' },
+  { id: 3, username: 'tech',    password: 'tech123',   name: 'Сервизен техник', role: 'tech' },
+  { id: 4, username: 'viewer1', password: 'viewer123', name: 'Наблюдател',      role: 'viewer' },
+];
+let demoMode = false;
+function demoSession() {
+  try { return JSON.parse(sessionStorage.getItem('lp_demo_user') || 'null'); } catch (e) { return null; }
+}
+function demoLogin(username, password) {
+  const u = DEMO_USERS.find(x => x.username === username && x.password === password);
+  if (!u) return null;
+  const user = { id: u.id, username: u.username, name: u.name, role: u.role };
+  try { sessionStorage.setItem('lp_demo_user', JSON.stringify(user)); } catch (e) {}
+  return user;
+}
+function enterDemoMode() {
+  demoMode = true;
+  const note = document.getElementById('demoNote');
+  if (note) note.style.display = 'block';
+}
+
 async function initAuth() {
   ensureDefaultUsers();
   let user = null;
   try {
     const res = await fetch('/api/session');
-    const data = await res.json();
-    user = data.user || null;
+    if (!(res.headers.get('content-type') || '').includes('application/json')) {
+      enterDemoMode();                         // статичен хост: няма /api
+      user = demoSession();
+    } else {
+      const data = await res.json();
+      user = data.user || null;
+    }
   } catch (e) {
     console.warn('Session check failed (сървърът стартиран ли е?):', e);
   }
@@ -3735,8 +3768,11 @@ document.addEventListener('keydown', e => {
 });
 
 async function doLogout() {
-  try { await fetch('/api/logout', { method: 'POST' }); }
-  catch (e) { console.warn('Logout request failed:', e); }
+  if (demoMode) { try { sessionStorage.removeItem('lp_demo_user'); } catch (e) {} }
+  else {
+    try { await fetch('/api/logout', { method: 'POST' }); }
+    catch (e) { console.warn('Logout request failed:', e); }
+  }
   currentUser = null;
   // Затвори всички отворени панели
   ['ordersOverlay','orderFormOverlay','expeditionOverlay','packageFormOverlay',
@@ -3787,6 +3823,20 @@ async function doLogin(opts) {
   if (!username || !password) {
     err.textContent = 'Грешно потребителско име или парола';
     err.style.display = 'block';
+    return;
+  }
+  if (demoMode) {
+    const du = demoLogin(username, password);
+    if (!du) {
+      err.textContent = 'Грешно потребителско име или парола';
+      err.style.display = 'block';
+      return;
+    }
+    currentUser = du;
+    recordLocalLogin(currentUser, viaQuickLogin ? 'Бърз вход (демо)' : 'Вход в демо режим');
+    hideLoginOverlay();
+    applyUserUI();
+    init();
     return;
   }
   let data;
@@ -8716,6 +8766,10 @@ applyUserUI = function() {
       Вход →
     </button>
     <div style="font-size:11px;color:#555;text-align:center;margin-top:14px;">При първи вход: admin / admin123</div>
+    <div id="demoNote" style="display:none;margin-top:12px;background:rgba(255,173,0,.1);border:1px solid rgba(255,173,0,.4);border-radius:7px;padding:9px 12px;font-size:11px;line-height:1.5;color:#ffad00;">
+      <b>Демо режим</b> — на този хостинг няма сървър, затова входът е само за преглед. Акаунти:
+      admin / admin123 · editor1 / editor123 · tech / tech123 · viewer1 / viewer123
+    </div>
     <div style="margin-top:14px;border-top:1px solid #333750;padding-top:12px;">
       <div style="font-size:10px;color:#555;text-align:center;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">Бърз вход (тест)</div>
       <div style="display:flex;gap:8px;">
